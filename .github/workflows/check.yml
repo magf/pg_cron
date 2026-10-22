@@ -1,7 +1,6 @@
 name: Check
 
 on:
-  push:
   pull_request:
     paths-ignore:
       - "*.md"
@@ -18,27 +17,33 @@ jobs:
       fail-fast: false
       matrix:
         image: [ggdb7_ubuntu]
-    container:
-      image: ghcr.io/greengagedb/greengage/${{ matrix.image }}:latest
-      options:
-        --sysctl "kernel.sem=500 1024000 200 4096"
+    env:
+      GGDB_IMAGE: ghcr.io/greengagedb/greengage/${{ matrix.image }}:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Build and install
-        run: ci/install.bash
-        working-directory: /home/gpadmin
-      - name: Tests
-        run: su gpadmin -c 'ci/test.bash'
+
+      - name: Build, Install and Test
+        run: |
+          set -eux
+          docker run \
+            --volume ./logs:/logs \
+            --volume ./:/home/gpadmin/pg_cron \
+            --sysctl "kernel.sem=500 1024000 200 4096" \
+            $GGDB_IMAGE \
+            bash -c "pg_cron/ci/install.bash && su gpadmin -c 'pg_cron/ci/test.bash'"
+
       - name: Collect logs
+        if: always()
         uses: greengagedb/greengage-ci/.github/actions/collect-logs@v55
         with:
           params: |
             gpAdminLogs d gpAdminLogs
             gpdb_src/gpAux/gpdemo/datadirs d *log
+
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
         if: always()
+        uses: actions/upload-artifact@v7
         with:
           name: pg_cron_${{ matrix.image }}_logs
-          path: /logs
+          path: logs
